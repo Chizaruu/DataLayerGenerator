@@ -1,25 +1,25 @@
-<?xml version="1.0" encoding="utf-8"?>
+﻿<?xml version="1.0" encoding="utf-8"?>
 <PackageManifest Version="2.0.0" xmlns="http://schemas.microsoft.com/developer/vsx-schema/2011" xmlns:d="http://schemas.microsoft.com/developer/vsx-schema-design/2011">
-    <Metadata>
-        <Identity Id="DataLayerGenerator.F8A9B0C1-D2E3-4F5A-9B0C-1D2E3F4A5B6C" Version="1.0.0" Language="en-US" Publisher="Chizaruu" />
-        <DisplayName>Data Layer Generator</DisplayName>
-        <Description xml:space="preserve">Automatically generates Entity Framework data access layer classes with CRUD operations for your model classes.</Description>
-        <MoreInfo>https://github.com/Chizaruu/DataLayerGenerator</MoreInfo>
-        <Icon>Resources\GenerateDataLayerCommand.png</Icon>
-        <Tags>EF Core, Entity Framework, Data Layer, Repository Pattern, Code Generator</Tags>
-    </Metadata>
-    <Installation>
-        <InstallationTarget Id="Microsoft.VisualStudio.Community" Version="[17.0,18.0)">
-            <ProductArchitecture>amd64</ProductArchitecture>
-        </InstallationTarget>
-    </Installation>
-    <Dependencies>
-        <Dependency Id="Microsoft.Framework.NDP" DisplayName="Microsoft .NET Framework" d:Source="Manual" Version="[4.7.2,)" />
-    </Dependencies>
-    <Prerequisites>
-        <Prerequisite Id="Microsoft.VisualStudio.Component.CoreEditor" Version="[17.0,18.0)" DisplayName="Visual Studio core editor" />
-    </Prerequisites>
-    <Assets>
-        <Asset Type="Microsoft.VisualStudio.VsPackage" d:Source="Project" d:ProjectName="%CurrentProject%" Path="|%CurrentProject%;PkgdefProjectOutputGroup|" />
-    </Assets>
+  <Metadata>
+    <Identity Id="DataLayerGenerator.F8A9B0C1-D2E3-4F5A-9B0C-1D2E3F4A5B6C" Version="1.0.1.0" Language="en-US" Publisher="Chizaruu" />
+    <DisplayName>Data Layer Generator</DisplayName>
+    <Description xml:space="preserve">Automatically generates Entity Framework data access layer classes with CRUD operations for your model classes.</Description>
+    <MoreInfo>https://github.com/Chizaruu/DataLayerGenerator</MoreInfo>
+    <Icon>Resources\GenerateDataLayerCommand.png</Icon>
+    <Tags>EF Core, Entity Framework, Data Layer, Repository Pattern, Code Generator</Tags>
+  </Metadata>
+  <Installation>
+    <InstallationTarget Id="Microsoft.VisualStudio.Community" Version="[17.0,18.0)">
+      <ProductArchitecture>amd64</ProductArchitecture>
+    </InstallationTarget>
+  </Installation>
+  <Dependencies>
+    <Dependency Id="Microsoft.Framework.NDP" DisplayName="Microsoft .NET Framework" d:Source="Manual" Version="[4.7.2,)" />
+  </Dependencies>
+  <Prerequisites>
+    <Prerequisite Id="Microsoft.VisualStudio.Component.CoreEditor" Version="[17.0,18.0)" DisplayName="Visual Studio core editor" />
+  </Prerequisites>
+  <Assets>
+    <Asset Type="Microsoft.VisualStudio.VsPackage" d:Source="Project" d:ProjectName="%CurrentProject%" Path="|%CurrentProject%;PkgdefProjectOutputGroup|" />
+  </Assets>
 </PackageManifest>
