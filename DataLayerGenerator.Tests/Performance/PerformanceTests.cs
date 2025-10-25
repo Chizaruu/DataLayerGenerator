@@ -12,45 +12,73 @@ namespace DataLayerGenerator.Tests.Performance
     /// <summary>
     /// Performance tests to ensure the generator runs efficiently
     /// </summary>
-    public class PerformanceTests : IDisposable
+    public class PerformanceTests : IAsyncLifetime, IDisposable
     {
         private readonly DataLayerGeneratorService _service;
         private readonly string _tempDirectory;
         private bool _disposed;
+        private static readonly object _warmupLock = new();
+        private static bool _isWarmedUp;
 
         public PerformanceTests()
         {
             _service = new DataLayerGeneratorService();
             _tempDirectory = Path.Combine(Path.GetTempPath(), $"PerfTests_{Guid.NewGuid()}");
             Directory.CreateDirectory(_tempDirectory);
-
-            // Warm up Roslyn to avoid measuring initialization in tests
-            WarmUpService();
         }
 
-        private void WarmUpService()
+        public async Task InitializeAsync()
         {
-            var warmupCode = "namespace Test { public class Warmup { public int Id { get; set; } } }";
-            var warmupFile = CreateTempFile(warmupCode);
-            try
-            {
-                _service.AnalyzeModelsAsync(warmupFile).GetAwaiter().GetResult();
+            // Warm up Roslyn to avoid measuring initialization in tests
+            await EnsureWarmedUpAsync();
+        }
 
-                // Also warm up code generation
-                var modelInfo = new ModelInfo
+        public Task DisposeAsync()
+        {
+            // No async cleanup needed
+            return Task.CompletedTask;
+        }
+
+        private async Task EnsureWarmedUpAsync()
+        {
+            if (_isWarmedUp) return;
+
+            // Use a simple lock for the flag check, but do async work outside the lock
+            bool shouldWarmup = false;
+            lock (_warmupLock)
+            {
+                if (!_isWarmedUp)
                 {
-                    ClassName = "Warmup",
-                    Namespace = "Test",
-                    HasIdProperty = true,
-                    Properties = new System.Collections.Generic.List<PropertyInfo>
-                    {
-                        new PropertyInfo { Name = "Id", Type = "int" }
-                    }
-                };
-                _service.GenerateDataLayerClass("Warmup", modelInfo, new DataLayerOptions());
-                _service.GenerateInterface("Warmup", modelInfo, new DataLayerOptions());
+                    shouldWarmup = true;
+                    _isWarmedUp = true; // Set it now to prevent other instances from trying
+                }
             }
-            catch { /* Ignore warm-up errors */ }
+
+            if (shouldWarmup)
+            {
+                var warmupCode = "namespace Test { public class Warmup { public int Id { get; set; } } }";
+                var warmupFile = CreateTempFile(warmupCode);
+                try
+                {
+                    // Async warmup
+                    _ = await _service.AnalyzeModelsAsync(warmupFile);
+
+                    // Also warm up code generation
+                    var modelInfo = new ModelInfo
+                    {
+                        ClassName = "Warmup",
+                        Namespace = "Test",
+                        HasIdProperty = true,
+                        Properties =
+                        [
+                            new() { Name = "Id", Type = "int" }
+                        ]
+                    };
+                    _service.GenerateDataLayerClass("Warmup", modelInfo, new DataLayerOptions());
+                    _service.GenerateInterface("Warmup", modelInfo, new DataLayerOptions());
+                }
+                catch { /* Ignore warm-up errors */ }
+            }
         }
 
         protected virtual void Dispose(bool disposing)
@@ -160,7 +188,7 @@ namespace TestApp.Models
             stopwatch.ElapsedMilliseconds.Should().BeLessThan(3000); // Should complete in < 3 seconds
         }
 
-        #endregion
+        #endregion Model Analysis Performance
 
         #region Code Generation Performance
 
@@ -173,9 +201,8 @@ namespace TestApp.Models
                 ClassName = "Product",
                 Namespace = "TestApp.Models",
                 HasIdProperty = true,
-                Properties = Enumerable.Range(1, 10)
-                    .Select(i => new PropertyInfo { Name = $"Property{i}", Type = "string" })
-                    .ToList()
+                Properties = [.. Enumerable.Range(1, 10)
+                    .Select(i => new PropertyInfo { Name = $"Property{i}", Type = "string" })]
             };
 
             var options = new DataLayerOptions
@@ -207,9 +234,8 @@ namespace TestApp.Models
                 ClassName = "LargeModel",
                 Namespace = "TestApp.Models",
                 HasIdProperty = true,
-                Properties = Enumerable.Range(1, 100)
-                    .Select(i => new PropertyInfo { Name = $"Property{i}", Type = "string" })
-                    .ToList()
+                Properties = [.. Enumerable.Range(1, 100)
+                    .Select(i => new PropertyInfo { Name = $"Property{i}", Type = "string" })]
             };
 
             var options = new DataLayerOptions
@@ -263,7 +289,7 @@ namespace TestApp.Models
             stopwatch.ElapsedMilliseconds.Should().BeLessThan(200); // Should complete in < 0.2 seconds
         }
 
-        #endregion
+        #endregion Code Generation Performance
 
         #region Batch Processing Performance
 
@@ -340,7 +366,7 @@ namespace TestApp.Models
             stopwatch.ElapsedMilliseconds.Should().BeLessThan(20000); // Should complete in < 20 seconds
         }
 
-        #endregion
+        #endregion Batch Processing Performance
 
         #region Memory Usage
 
@@ -348,7 +374,10 @@ namespace TestApp.Models
         public async Task MemoryUsage_LargeFile_StaysReasonableAsync()
         {
             // Arrange
+            // GC.Collect intentionally used for accurate memory measurement in performance test
+#pragma warning disable S1215 // "GC.Collect" should not be called
             var initialMemory = GC.GetTotalMemory(true);
+#pragma warning restore S1215
 
             var properties = string.Join("\n",
                 Enumerable.Range(1, 1000)
@@ -366,7 +395,7 @@ namespace TestApp.Models
 
             // Act
             var result = await _service.AnalyzeModelsAsync(filePath);
-            var dataLayerCode = _service.GenerateDataLayerClass(
+            _ = _service.GenerateDataLayerClass(
                 "VeryLargeModel",
                 result[0],
                 new DataLayerOptions { GenerateGetAll = true });
@@ -389,10 +418,13 @@ namespace TestApp.Models
 }";
             var filePath = CreateTempFile(sourceCode);
 
+            // GC.Collect intentionally used for accurate memory leak detection in performance test
+#pragma warning disable S1215 // "GC.Collect" should not be called
             GC.Collect();
             GC.WaitForPendingFinalizers();
             GC.Collect();
             var initialMemory = GC.GetTotalMemory(true);
+#pragma warning restore S1215
 
             // Act - Process same file 100 times
             for (int i = 0; i < 100; i++)
@@ -404,17 +436,21 @@ namespace TestApp.Models
                     new DataLayerOptions { GenerateGetAll = true });
             }
 
+            // GC.Collect intentionally used for accurate memory leak detection in performance test
+#pragma warning disable S1215 // "GC.Collect" should not be called
             GC.Collect();
             GC.WaitForPendingFinalizers();
             GC.Collect();
             var finalMemory = GC.GetTotalMemory(true);
+#pragma warning restore S1215
+
             var memoryGrowth = (finalMemory - initialMemory) / 1024 / 1024; // MB
 
             // Assert - Memory shouldn't grow significantly
             memoryGrowth.Should().BeLessThan(50); // Should grow < 50 MB over 100 iterations
         }
 
-        #endregion
+        #endregion Memory Usage
 
         #region Concurrent Processing
 
@@ -456,7 +492,7 @@ namespace TestApp.Models
             stopwatch.ElapsedMilliseconds.Should().BeLessThan(3000); // Concurrent should be faster
         }
 
-        #endregion
+        #endregion Concurrent Processing
 
         #region Comparison Benchmarks
 
@@ -508,7 +544,7 @@ namespace TestApp.Models
             stopwatch.ElapsedMilliseconds.Should().BeLessThan(1000);
         }
 
-        #endregion
+        #endregion Comparison Benchmarks
 
         private string CreateTempFile(string content)
         {
