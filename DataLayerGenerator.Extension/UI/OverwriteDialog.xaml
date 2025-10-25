@@ -1,0 +1,80 @@
+﻿<Window x:Class="DataLayerGenerator.UI.OverwriteDialog"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="File Exists"
+        Height="240" Width="450"
+        WindowStartupLocation="CenterOwner"
+        ResizeMode="NoResize"
+        ShowInTaskbar="False"
+        Background="#F0F0F0">
+    <Window.Resources>
+        <Style TargetType="Button">
+            <Setter Property="Padding" Value="20,8" />
+            <Setter Property="Margin" Value="5,5,5,0" />
+            <Setter Property="MinWidth" Value="100" />
+            <Setter Property="FontSize" Value="12" />
+        </Style>
+    </Window.Resources>
+
+    <Grid Margin="20">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <!-- Icon and Message -->
+        <StackPanel Grid.Row="0" Orientation="Horizontal" Margin="0,0,0,15">
+            <TextBlock Text="⚠️" FontSize="32" Margin="0,0,15,0" VerticalAlignment="Center" />
+            <StackPanel VerticalAlignment="Center">
+                <TextBlock x:Name="MessageText"
+                           Text="File already exists"
+                           FontWeight="Bold"
+                           FontSize="14"
+                           TextWrapping="Wrap" />
+            </StackPanel>
+        </StackPanel>
+
+        <!-- Description -->
+        <TextBlock Grid.Row="1"
+                   Text="What would you like to do?"
+                   Margin="0,0,0,20"
+                   FontSize="12"
+                   Foreground="#555" />
+
+        <!-- Buttons Grid -->
+        <Grid Grid.Row="4">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+            </Grid.RowDefinitions>
+
+            <Button Grid.Row="0" Grid.Column="0"
+                    Content="Yes"
+                    Click="Yes_Click"
+                    ToolTip="Overwrite this file" />
+
+            <Button Grid.Row="0" Grid.Column="1"
+                    Content="Yes to All"
+                    Click="YesToAll_Click"
+                    ToolTip="Overwrite this and all remaining files" />
+
+            <Button Grid.Row="1" Grid.Column="0"
+                    Content="No"
+                    IsDefault="True"
+                    Click="No_Click"
+                    ToolTip="Skip this file" />
+
+            <Button Grid.Row="1" Grid.Column="1"
+                    Content="No to All"
+                    Click="NoToAll_Click"
+                    ToolTip="Skip this and all remaining files" />
+        </Grid>
+    </Grid>
+</Window>

@@ -1,0 +1,460 @@
+name: Visual Studio Extension Release
+
+permissions:
+  contents: write  # Needed for creating releases and pushing tags
+
+on:
+  push:
+    branches:
+      - main
+      - dev
+    paths:
+      - '**.cs'
+      - '**.csproj'
+      - '**.xaml'
+      - '**.vsct'
+      - '**.vsixmanifest'
+      - '.github/workflows/release.yml'
+
+# Prevent multiple releases from running simultaneously
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false  # Don't cancel releases, queue them
+
+jobs:
+  build-and-publish:
+    runs-on: windows-latest
+
+    # Require environment approval based on branch
+    environment:
+      name: ${{ github.ref_name == 'main' && 'production' || 'development' }}
+      url: https://github.com/${{ github.repository }}/releases
+
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+      
+      - name: Determine version bump type
+        id: version-bump
+        shell: bash
+        run: |
+          BRANCH="${{ github.ref_name }}"
+          
+          # Check if this is a merge from dev to main
+          if [ "$BRANCH" == "main" ]; then
+            MERGE_MESSAGE=$(git log -1 --pretty=%B)
+            
+            if echo "$MERGE_MESSAGE" | grep -qiE "Merge pull request.*(from|dev)"; then
+              echo "🔀 Detected dev → main merge, will promote dev version to production"
+              echo "BUMP_TYPE=promotion" >> $GITHUB_OUTPUT
+              echo "CONVENTIONAL_COMMIT_FOUND=true" >> $GITHUB_OUTPUT
+              exit 0
+            fi
+            
+            # For main branch, check against last production tag
+            LAST_TAG=$(git tag -l "v*" --sort=-version:refname | grep -v "-" | head -1 || echo "v0.0.0")
+          else
+            # For dev branch, check against last tag (any type)
+            LAST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")
+          fi
+          
+          echo "Last tag: $LAST_TAG"
+          
+          # Get commits since last tag
+          COMMITS=$(git log ${LAST_TAG}..HEAD --pretty=format:"%s" 2>/dev/null || git log --pretty=format:"%s")
+          echo "Analyzing commits:"
+          echo "$COMMITS"
+          
+          # Determine bump type based on conventional commits
+          BUMP_TYPE="none"
+          CONVENTIONAL_COMMIT_FOUND="false"
+          
+          # Check for breaking changes (major version)
+          if echo "$COMMITS" | grep -qiE "^(BREAKING CHANGE|.*!:)"; then
+            BUMP_TYPE="major"
+            CONVENTIONAL_COMMIT_FOUND="true"
+            echo "🚨 Breaking change detected → MAJOR version bump"
+          # Check for features (minor version)
+          elif echo "$COMMITS" | grep -qiE "^feat(\(.*\))?:"; then
+            BUMP_TYPE="minor"
+            CONVENTIONAL_COMMIT_FOUND="true"
+            echo "✨ New feature detected → MINOR version bump"
+          # Check for fixes (patch version)
+          elif echo "$COMMITS" | grep -qiE "^fix(\(.*\))?:"; then
+            BUMP_TYPE="patch"
+            CONVENTIONAL_COMMIT_FOUND="true"
+            echo "🐛 Bug fix detected → PATCH version bump"
+          # Check for other conventional commit types
+          elif echo "$COMMITS" | grep -qiE "^(chore|docs|style|refactor|perf|test|build|ci)(\(.*\))?:"; then
+            BUMP_TYPE="patch"
+            CONVENTIONAL_COMMIT_FOUND="true"
+            echo "🔧 Maintenance commit detected → PATCH version bump"
+          elif echo "$COMMITS" | grep -qiE "^*(patch)(\(.*\))?:"; then
+            BUMP_TYPE="patch"
+            CONVENTIONAL_COMMIT_FOUND="true"
+            echo "🔧 Patch commit detected → PATCH version bump"
+          else
+            BUMP_TYPE="none"
+            CONVENTIONAL_COMMIT_FOUND="false"
+            echo "⏭️ No conventional commit detected → Skipping build"
+            echo ""
+            echo "ℹ️ Use conventional commit format to trigger a release:"
+            echo "  • feat: for new features (minor version bump)"
+            echo "  • fix: for bug fixes (patch version bump)"
+            echo "  • chore/docs/style/refactor/perf/test: for maintenance (patch version bump)"
+            echo "  • BREAKING CHANGE or !: for breaking changes (major version bump)"
+          fi
+          
+          echo "BUMP_TYPE=$BUMP_TYPE" >> $GITHUB_OUTPUT
+          echo "CONVENTIONAL_COMMIT_FOUND=$CONVENTIONAL_COMMIT_FOUND" >> $GITHUB_OUTPUT
+      
+      - name: Setup MSBuild
+        if: steps.version-bump.outputs.CONVENTIONAL_COMMIT_FOUND == 'true'
+        uses: microsoft/setup-msbuild@v2
+      
+      - name: Setup NuGet
+        if: steps.version-bump.outputs.CONVENTIONAL_COMMIT_FOUND == 'true'
+        uses: NuGet/setup-nuget@v2
+      
+      # Cache NuGet packages
+      - name: Cache NuGet packages
+        if: steps.version-bump.outputs.CONVENTIONAL_COMMIT_FOUND == 'true'
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.nuget/packages
+            ${{ github.workspace }}/.nuget/packages
+          key: ${{ runner.os }}-nuget-${{ hashFiles('**/packages.lock.json', '**/*.csproj') }}
+          restore-keys: |
+            ${{ runner.os }}-nuget-
+      
+      - name: Restore NuGet packages
+        if: steps.version-bump.outputs.CONVENTIONAL_COMMIT_FOUND == 'true'
+        run: nuget restore DataLayerGenerator.Extension/DataLayerGenerator.Extension.csproj
+      
+      - name: Auto-increment version
+        if: steps.version-bump.outputs.CONVENTIONAL_COMMIT_FOUND == 'true'
+        id: version
+        shell: pwsh
+        run: |
+          # Read current version from vsixmanifest using PowerShell XML parsing
+          $manifestFile = "DataLayerGenerator.Extension/source.extension.vsixmanifest"
+          
+          # Load XML properly
+          [xml]$manifest = Get-Content $manifestFile
+          $currentVersion = $manifest.PackageManifest.Metadata.Identity.Version
+          
+          if ([string]::IsNullOrEmpty($currentVersion)) {
+            Write-Host "❌ Could not read version from manifest"
+            exit 1
+          }
+          
+          Write-Host "Current version: $currentVersion"
+          
+          $bumpType = "${{ steps.version-bump.outputs.BUMP_TYPE }}"
+          $branchName = "${{ github.ref_name }}"
+          
+          # Parse version components
+          $versionParts = $currentVersion.Split('.')
+          $major = [int]$versionParts[0]
+          $minor = [int]$versionParts[1]
+          $patch = [int]$versionParts[2]
+          
+          # Handle promotion vs normal bump
+          if ($bumpType -eq "promotion") {
+            # Promotion: keep current version, just remove -dev suffix for display
+            Write-Host "🔀 Promoting dev version to production"
+            $baseVersion = "$major.$minor.$patch"
+            $newVersion = "$baseVersion.0"
+            $displayVersion = $baseVersion
+            $isPrerelease = "false"
+            $tagName = "v$displayVersion"
+            $releaseName = "v$displayVersion Release"
+            $releaseType = "production"
+            Write-Host "📦 Production version: $displayVersion (promoted from dev)"
+          }
+          else {
+            # Normal bump: increment version based on conventional commit type
+            if ($bumpType -eq "major") {
+              $major++
+              $minor = 0
+              $patch = 0
+            }
+            elseif ($bumpType -eq "minor") {
+              $minor++
+              $patch = 0
+            }
+            elseif ($bumpType -eq "patch") {
+              $patch++
+            }
+            
+            $baseVersion = "$major.$minor.$patch"
+            
+            # Determine release type based on branch
+            if ($branchName -eq "dev") {
+              # Dev branch: add -dev suffix
+              $newVersion = "$baseVersion.0"
+              $displayVersion = "$baseVersion-dev"
+              $isPrerelease = "true"
+              $tagName = "v$displayVersion"
+              $releaseName = "v$displayVersion 🔧 Dev Release"
+              $releaseType = "dev"
+              Write-Host "🔧 Dev version: $displayVersion ($bumpType bump)"
+            }
+            else {
+              # Main branch: production release
+              $newVersion = "$baseVersion.0"
+              $displayVersion = $baseVersion
+              $isPrerelease = "false"
+              $tagName = "v$displayVersion"
+              $releaseName = "v$displayVersion Release"
+              $releaseType = "production"
+              Write-Host "📦 Production version: $displayVersion ($bumpType bump)"
+            }
+          }
+          
+          Write-Host "New version will be: $newVersion (display: $displayVersion)"
+          
+          # Update version in XML using proper XML manipulation
+          $manifest.PackageManifest.Metadata.Identity.Version = $newVersion
+          $manifest.Save((Resolve-Path $manifestFile))
+          
+          # Verify the change
+          [xml]$verifyManifest = Get-Content $manifestFile
+          $newVersionCheck = $verifyManifest.PackageManifest.Metadata.Identity.Version
+          Write-Host "Verified new version in manifest: $newVersionCheck"
+          
+          if ($newVersionCheck -ne $newVersion) {
+            Write-Host "❌ Version update failed!"
+            exit 1
+          }
+          
+          # Set outputs
+          "VERSION=$newVersion" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          "DISPLAY_VERSION=$displayVersion" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          "TAG_NAME=$tagName" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          "BUMP_TYPE=$bumpType" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          "IS_PRERELEASE=$isPrerelease" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          "RELEASE_NAME=$releaseName" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          "RELEASE_TYPE=$releaseType" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+      
+      - name: Commit and push version bump
+        if: steps.version-bump.outputs.CONVENTIONAL_COMMIT_FOUND == 'true'
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          
+          # Check if there are changes to commit
+          if git diff --quiet DataLayerGenerator.Extension/source.extension.vsixmanifest; then
+            echo "ℹ️ No version changes to commit (version already up to date)"
+          else
+            echo "📝 Committing version bump to ${{ steps.version.outputs.VERSION }}"
+            git add DataLayerGenerator.Extension/source.extension.vsixmanifest
+            git commit -m "chore: bump version to ${{ steps.version.outputs.VERSION }} [skip ci]"
+            git push
+            echo "✅ Version bump committed and pushed"
+          fi
+      
+      - name: Build Extension
+        if: steps.version-bump.outputs.CONVENTIONAL_COMMIT_FOUND == 'true'
+        run: msbuild DataLayerGenerator.Extension/DataLayerGenerator.Extension.csproj /p:Configuration=Release /p:DeployExtension=false /p:ZipPackageCompressionLevel=normal /v:minimal /m
+      
+      - name: Locate VSIX file
+        if: steps.version-bump.outputs.CONVENTIONAL_COMMIT_FOUND == 'true'
+        id: locate-vsix
+        shell: bash
+        run: |
+          VSIX_PATH=$(find DataLayerGenerator.Extension/bin/Release -name "*.vsix" | head -1)
+          if [ -z "$VSIX_PATH" ]; then
+            echo "❌ VSIX file not found!"
+            exit 1
+          fi
+          echo "✅ Found VSIX: $VSIX_PATH"
+          
+          # Rename VSIX to include version
+          VSIX_DIR=$(dirname "$VSIX_PATH")
+          NEW_VSIX_NAME="DataLayerGenerator-${{ steps.version.outputs.DISPLAY_VERSION }}.vsix"
+          NEW_VSIX_PATH="$VSIX_DIR/$NEW_VSIX_NAME"
+          mv "$VSIX_PATH" "$NEW_VSIX_PATH"
+          echo "📦 Renamed to: $NEW_VSIX_PATH"
+          
+          echo "VSIX_PATH=$NEW_VSIX_PATH" >> $GITHUB_OUTPUT
+          echo "VSIX_NAME=$NEW_VSIX_NAME" >> $GITHUB_OUTPUT
+      
+      - name: Create and push git tag
+        if: steps.version-bump.outputs.CONVENTIONAL_COMMIT_FOUND == 'true'
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag -a "${{ steps.version.outputs.TAG_NAME }}" -m "Release ${{ steps.version.outputs.TAG_NAME }}"
+          git push origin "${{ steps.version.outputs.TAG_NAME }}"
+      
+      - name: Generate release notes
+        if: steps.version-bump.outputs.CONVENTIONAL_COMMIT_FOUND == 'true'
+        id: release-notes
+        shell: pwsh
+        run: |
+          $releaseType = "${{ steps.version.outputs.RELEASE_TYPE }}"
+          $displayVersion = "${{ steps.version.outputs.DISPLAY_VERSION }}"
+          $currentTag = "${{ steps.version.outputs.TAG_NAME }}"
+          $bumpType = "${{ steps.version-bump.outputs.BUMP_TYPE }}"
+          
+          # Extract base version (e.g., "1.0.1" from "1.0.1-dev")
+          $baseVersion = $displayVersion -replace '-.*$', ''
+          
+          # Find the last tag of the same type (excluding current tag)
+          if ($releaseType -eq "dev") {
+            # Get last dev tag (excluding current)
+            $lastTag = git tag -l "v*-dev*" --sort=-version:refname | Where-Object { $_ -ne $currentTag } | Select-Object -First 1
+          }
+          else {
+            # Production releases: exclude current tag and any prerelease tags
+            $lastTag = git tag -l "v*" --sort=-version:refname | Where-Object { $_ -notmatch "-" -and $_ -ne $currentTag } | Select-Object -First 1
+          }
+          
+          Write-Host "Current tag: $currentTag"
+          Write-Host "Last tag: $lastTag"
+          
+          # Get commits using git log first (more reliable for commit ranges)
+          $commits = ""
+          if ([string]::IsNullOrEmpty($lastTag)) {
+            Write-Host "No previous tag found - using all commits"
+            $tagInfo = "First $releaseType release"
+            $gitCommits = git log --first-parent --pretty=format:"%H||%s" --reverse --grep="^chore: bump version" --invert-grep
+          }
+          else {
+            Write-Host "Getting commits between $lastTag and HEAD"
+            $tagInfo = "Since $lastTag"
+            $gitCommits = git log --first-parent "$lastTag..HEAD" --pretty=format:"%H||%s" --reverse --grep="^chore: bump version" --invert-grep
+          }
+          
+          # Try to enrich with GitHub usernames via API
+          $commitList = @()
+          try {
+            Write-Host "Enriching commits with GitHub usernames..."
+            
+            # Build SHA list for lookup
+            $shaMap = @{}
+            foreach ($line in $gitCommits) {
+              if ([string]::IsNullOrEmpty($line)) { continue }
+              
+              $parts = $line -split '\|\|'
+              if ($parts.Count -lt 2) { continue }
+              
+              $sha = $parts[0]
+              $message = $parts[1]
+              $shaMap[$sha] = $message
+            }
+            
+            if ($shaMap.Count -eq 0) {
+              throw "No commits to process"
+            }
+            
+            Write-Host "Found $($shaMap.Count) commits to enrich"
+            
+            # Fetch commit details from GitHub API (in batches if needed)
+            foreach ($sha in $shaMap.Keys) {
+              try {
+                $apiResponse = gh api "repos/${{ github.repository }}/commits/$sha" --jq '"\(.author.login // "unknown")"' 2>$null
+                
+                if ($LASTEXITCODE -eq 0 -and ![string]::IsNullOrEmpty($apiResponse)) {
+                  $author = $apiResponse.Trim()
+                  $message = $shaMap[$sha]
+                  $shortSha = $sha.Substring(0, 7)
+                  $commitList += "- $message by @$author ($shortSha)"
+                }
+                else {
+                  # Fallback to without username
+                  $message = $shaMap[$sha]
+                  $shortSha = $sha.Substring(0, 7)
+                  $commitList += "- $message ($shortSha)"
+                }
+              }
+              catch {
+                # Fallback to without username
+                $message = $shaMap[$sha]
+                $shortSha = $sha.Substring(0, 7)
+                $commitList += "- $message ($shortSha)"
+              }
+            }
+            
+            $commits = $commitList -join "`n"
+            Write-Host "✅ Successfully processed $($commitList.Count) commits"
+          }
+          catch {
+            Write-Host "⚠️ Could not enrich with GitHub usernames: $_"
+            Write-Host "Using plain git log format"
+            
+            # Fallback to simple git log format
+            if ([string]::IsNullOrEmpty($lastTag)) {
+              $commits = git log --first-parent --pretty=format:"- %s (%h)" --reverse --grep="^chore: bump version" --invert-grep
+            }
+            else {
+              $commits = git log --first-parent "$lastTag..HEAD" --pretty=format:"- %s (%h)" --reverse --grep="^chore: bump version" --invert-grep
+            }
+          }
+          
+          # If no commits found, add a placeholder
+          if ([string]::IsNullOrEmpty($commits)) {
+            $commits = "- Initial release"
+          }
+          
+          # Build installation instructions
+          $installation = "## Installation`n`n"
+          $installation += "1. Download the ``.vsix`` file below`n"
+          $installation += "2. Double-click to install in Visual Studio`n"
+          $installation += "3. Or use: ``Extensions > Manage Extensions > Install from file```n"
+          
+          # Build release body
+          $releaseBody = ""
+          
+          if ("${{ steps.version.outputs.IS_PRERELEASE }}" -eq "true") {
+            $releaseBody += "## Pre-release`n`n"
+            $releaseBody += "**Version:** v$displayVersion`n"
+            $releaseBody += "**Commit:** ${{ github.sha }}`n`n"
+            $releaseBody += "**Changes ($tagInfo):**`n"
+            $releaseBody += "$commits`n`n"
+            $releaseBody += $installation
+          }
+          else {
+            if ($bumpType -eq "promotion") {
+              $releaseBody += "## 🚀 Promoted from Dev`n`n"
+            }
+            else {
+              $emoji = switch ($bumpType) {
+                "major" { "🚨 Major" }
+                "minor" { "✨ Minor" }
+                default { "🐛 Patch" }
+              }
+              $releaseBody += "## $emoji Version Bump`n`n"
+            }
+            
+            $releaseBody += "**Version:** v$displayVersion`n`n"
+            $releaseBody += "**Changes ($tagInfo):**`n"
+            $releaseBody += "$commits`n`n"
+            $releaseBody += $installation
+          }
+          
+          $releaseBody | Out-File -FilePath release-notes.txt -Encoding utf8
+        env:
+          GH_TOKEN: ${{ github.token }}
+      
+      - name: Create GitHub Release with VSIX
+        if: steps.version-bump.outputs.CONVENTIONAL_COMMIT_FOUND == 'true'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.TAG_NAME }}
+          name: ${{ steps.version.outputs.RELEASE_NAME }}
+          body_path: release-notes.txt
+          draft: false
+          prerelease: ${{ steps.version.outputs.IS_PRERELEASE }}
+          files: |
+            ${{ steps.locate-vsix.outputs.VSIX_PATH }}
+          token: ${{ secrets.GITHUB_TOKEN }}

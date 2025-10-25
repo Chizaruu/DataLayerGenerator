@@ -1,0 +1,91 @@
+<Window x:Class="DataLayerGenerator.UI.GenerateDataLayerDialog"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Generate Data Layer" 
+        Width="500" Height="450" 
+        WindowStartupLocation="CenterScreen"
+        ResizeMode="NoResize"
+        ShowInTaskbar="False">
+    <Grid Margin="20">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <!-- Model Info -->
+        <StackPanel Grid.Row="0" Margin="0,0,0,20">
+            <TextBlock Text="Model Class:" FontWeight="Bold" Margin="0,0,0,5"/>
+            <TextBlock x:Name="ModelNameText" FontSize="14" Foreground="#0066CC"/>
+        </StackPanel>
+
+        <!-- Interface Option -->
+        <GroupBox Grid.Row="1" Header="Interface" Margin="0,0,0,15" Padding="10">
+            <CheckBox x:Name="GenerateInterfaceCheckBox" 
+                      Content="Generate interface for data layer class" 
+                      IsChecked="True"/>
+        </GroupBox>
+
+        <!-- CRUD Methods -->
+        <GroupBox Grid.Row="2" Header="CRUD Methods to Generate" Padding="10">
+            <StackPanel>
+                <CheckBox x:Name="GenerateGetAllCheckBox" 
+                          Content="GetAll() / GetAllAsync() - Retrieve all entities" 
+                          IsChecked="True" 
+                          Margin="0,5"/>
+                
+                <CheckBox x:Name="GenerateGetByIdCheckBox" 
+                          Content="GetByIdAsync() - Retrieve entity by ID" 
+                          IsChecked="True" 
+                          Margin="0,5"/>
+                
+                <CheckBox x:Name="GenerateAddCheckBox" 
+                          Content="AddAsync() - Add new entity" 
+                          IsChecked="True" 
+                          Margin="0,5"/>
+                
+                <CheckBox x:Name="GenerateUpdateCheckBox" 
+                          Content="UpdateAsync() - Update existing entity" 
+                          IsChecked="True" 
+                          Margin="0,5"/>
+                
+                <CheckBox x:Name="GenerateDeleteCheckBox" 
+                          Content="DeleteAsync() - Delete entity by ID" 
+                          IsChecked="True" 
+                          Margin="0,5"/>
+
+                <Separator Margin="0,10"/>
+
+                <CheckBox x:Name="IncludeCustomQueriesCheckBox" 
+                          Content="Include placeholder for custom queries" 
+                          IsChecked="False" 
+                          Margin="0,5"/>
+
+                <!-- Quick Actions -->
+                <StackPanel Orientation="Horizontal" Margin="0,15,0,0">
+                    <Button Content="Select All" 
+                            Click="SelectAll_Click" 
+                            Padding="10,3" 
+                            Margin="0,0,10,0"/>
+                    <Button Content="Deselect All" 
+                            Click="DeselectAll_Click" 
+                            Padding="10,3"/>
+                </StackPanel>
+            </StackPanel>
+        </GroupBox>
+
+        <!-- Action Buttons -->
+        <StackPanel Grid.Row="3" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,20,0,0">
+            <Button Content="Generate" 
+                    Click="OK_Click" 
+                    IsDefault="True" 
+                    Padding="20,5" 
+                    Margin="0,0,10,0"/>
+            <Button Content="Cancel" 
+                    Click="Cancel_Click" 
+                    IsCancel="True" 
+                    Padding="20,5"/>
+        </StackPanel>
+    </Grid>
+</Window>

@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="utf-8"?>
+<CommandTable xmlns="http://schemas.microsoft.com/VisualStudio/2005-10-18/CommandTable" xmlns:xs="http://www.w3.org/2001/XMLSchema">
+
+  <Extern href="stdidcmd.h"/>
+  <Extern href="vsshlids.h"/>
+
+  <Commands package="guidDataLayerGeneratorPackage">
+    <Groups>
+      <Group guid="guidDataLayerGeneratorPackageCmdSet" id="DataLayerMenuGroup" priority="0x0600">
+        <Parent guid="guidSHLMainMenu" id="IDM_VS_CTXT_ITEMNODE"/>
+      </Group>
+    </Groups>
+
+    <Buttons>
+      <Button guid="guidDataLayerGeneratorPackageCmdSet" id="GenerateDataLayerCommandId" priority="0x0100" type="Button">
+        <Parent guid="guidDataLayerGeneratorPackageCmdSet" id="DataLayerMenuGroup" />
+        <Icon guid="guidImages" id="bmpPic1" />
+        <Strings>
+          <ButtonText>Generate Data Layer</ButtonText>
+        </Strings>
+      </Button>
+    </Buttons>
+
+    <Bitmaps>
+      <Bitmap guid="guidImages" href="Resources\GenerateDataLayerCommand.png" usedList="bmpPic1"/>
+    </Bitmaps>
+  </Commands>
+
+  <Symbols>
+    <GuidSymbol name="guidDataLayerGeneratorPackage" value="{D7E8F9A0-B1C2-4D5E-9F0A-4B5C6D7E8F9A}" />
+
+    <GuidSymbol name="guidDataLayerGeneratorPackageCmdSet" value="{C5D6E7F8-A9B0-4C5D-8E7F-3A4B5C6D7E8F}">
+      <IDSymbol name="DataLayerMenuGroup" value="0x1020" />
+      <IDSymbol name="GenerateDataLayerCommandId" value="0x0100" />
+    </GuidSymbol>
+
+    <GuidSymbol name="guidImages" value="{E9F0A1B2-C3D4-5E6F-0A1B-2C3D4E5F6A7B}">
+      <IDSymbol name="bmpPic1" value="1" />
+    </GuidSymbol>
+  </Symbols>
+</CommandTable>

@@ -1,0 +1,183 @@
+name: Pull Request Tests
+
+permissions:
+  contents: read
+  checks: write
+  pull-requests: write
+
+on:
+  pull_request:
+    branches: [main, dev]
+    types: [opened, synchronize, reopened]
+    paths:
+      - '**.cs'
+      - '**.csproj'
+      - '**.xaml'
+      - '**.vsct'
+      - '**.vsixmanifest'
+      - '.github/workflows/pr-tests.yml'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  DOTNET_SKIP_FIRST_TIME_EXPERIENCE: true
+  DOTNET_CLI_TELEMETRY_OPTOUT: true
+
+jobs:
+  build-and-test:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Needed for better caching
+      
+      - name: Setup MSBuild
+        uses: microsoft/setup-msbuild@v2
+      
+      - name: Setup NuGet
+        uses: NuGet/setup-nuget@v2
+      
+      # Improved caching with better key strategy
+      - name: Cache NuGet packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.nuget/packages
+          key: ${{ runner.os }}-nuget-${{ hashFiles('**/*.csproj') }}
+          restore-keys: |
+            ${{ runner.os }}-nuget-
+      
+      # Restore once for the entire solution
+      - name: Restore NuGet packages
+        run: |
+          Write-Host "🔄 Restoring NuGet packages..."
+          nuget restore DataLayerGenerator.Extension/DataLayerGenerator.Extension.csproj
+          nuget restore DataLayerGenerator.Tests/DataLayerGenerator.Tests.csproj
+        shell: pwsh
+      
+      # Build Debug configuration (for tests)
+      - name: Build Solution (Debug)
+        run: |
+          Write-Host "🔨 Building Debug configuration..."
+          msbuild DataLayerGenerator.Extension/DataLayerGenerator.Extension.csproj /p:Configuration=Debug /v:minimal /m /warnaserror
+          msbuild DataLayerGenerator.Tests/DataLayerGenerator.Tests.csproj /p:Configuration=Debug /v:minimal /m /warnaserror
+        shell: pwsh
+      
+      - name: Setup VSTest
+        uses: darenm/Setup-VSTest@v1.2
+      
+      - name: Run Tests
+        timeout-minutes: 10
+        shell: pwsh
+        run: |
+          Write-Host "🧪 Running tests..."
+          
+          $testDll = Get-ChildItem -Path "DataLayerGenerator.Tests\bin\Debug" -Filter "DataLayerGenerator.Tests.dll" -Recurse | Select-Object -First 1
+          
+          if ($null -eq $testDll) {
+            Write-Host "❌ Test DLL not found!"
+            exit 1
+          }
+          
+          Write-Host "✅ Found test DLL at: $($testDll.FullName)"
+          
+          # Run tests with detailed logging
+          vstest.console.exe $testDll.FullName `
+            /logger:trx `
+            /logger:"console;verbosity=normal" `
+            /ResultsDirectory:TestResults `
+            /Parallel
+      
+      # Simplified test results - just use artifacts
+      - name: Upload Test Results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: test-results
+          path: TestResults/*.trx
+          retention-days: 7
+      
+      - name: Test Summary
+        if: always()
+        timeout-minutes: 2
+        shell: pwsh
+        run: |
+          $trxFiles = Get-ChildItem -Path TestResults -Filter *.trx -Recurse
+          
+          if ($trxFiles.Count -eq 0) {
+            Write-Host "❌ No test results found!"
+            exit 1
+          }
+          
+          foreach ($trxFile in $trxFiles) {
+            [xml]$trx = Get-Content $trxFile.FullName
+            $summary = $trx.TestRun.ResultSummary
+            $counters = $summary.Counters
+            
+            $total = [int]$counters.total
+            $passed = [int]$counters.passed
+            $failed = [int]$counters.failed
+            $skipped = [int]$counters.total - [int]$counters.executed
+            
+            Write-Host ""
+            Write-Host "📊 Test Summary"
+            Write-Host "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+            Write-Host "✅ Passed:  $passed"
+            Write-Host "❌ Failed:  $failed"
+            Write-Host "⏭️  Skipped: $skipped"
+            Write-Host "📝 Total:   $total"
+            Write-Host "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+            
+            # Output to GitHub Actions summary
+            echo "## 📊 Test Results" >> $env:GITHUB_STEP_SUMMARY
+            echo "" >> $env:GITHUB_STEP_SUMMARY
+            echo "| Metric | Count |" >> $env:GITHUB_STEP_SUMMARY
+            echo "|--------|-------|" >> $env:GITHUB_STEP_SUMMARY
+            echo "| ✅ Passed | $passed |" >> $env:GITHUB_STEP_SUMMARY
+            echo "| ❌ Failed | $failed |" >> $env:GITHUB_STEP_SUMMARY
+            echo "| ⏭️ Skipped | $skipped |" >> $env:GITHUB_STEP_SUMMARY
+            echo "| 📝 Total | $total |" >> $env:GITHUB_STEP_SUMMARY
+            
+            if ($failed -gt 0) {
+              Write-Host ""
+              Write-Host "❌ Tests Failed!"
+              
+              # Show failed tests
+              $failedTests = $trx.TestRun.Results.UnitTestResult | Where-Object { $_.outcome -eq "Failed" }
+              if ($failedTests) {
+                Write-Host ""
+                Write-Host "Failed Tests:"
+                foreach ($test in $failedTests) {
+                  Write-Host "  - $($test.testName)"
+                  if ($test.Output.ErrorInfo.Message) {
+                    Write-Host "    Error: $($test.Output.ErrorInfo.Message)"
+                  }
+                }
+              }
+              
+              exit 1
+            } else {
+              Write-Host ""
+              Write-Host "✅ All Tests Passed!"
+            }
+          }
+      
+      # Build Release configuration
+      - name: Build Solution (Release)
+        run: |
+          Write-Host "🔨 Building Release configuration..."
+          msbuild DataLayerGenerator.Extension/DataLayerGenerator.Extension.csproj /p:Configuration=Release /v:minimal /m /warnaserror
+        shell: pwsh
+      
+      - name: Final Status
+        if: success()
+        run: |
+          Write-Host "✅ All checks passed successfully!"
+          echo "## ✅ Build and Test Successful" >> $env:GITHUB_STEP_SUMMARY
+          echo "" >> $env:GITHUB_STEP_SUMMARY
+          echo "All builds completed and all tests passed!" >> $env:GITHUB_STEP_SUMMARY
+        shell: pwsh
